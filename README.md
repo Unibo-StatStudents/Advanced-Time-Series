@@ -23,24 +23,8 @@ In this course, we delve into advanced techniques for analyzing and forecasting 
 - Autoregressive Integrated Moving Average (ARIMA) models
 - Seasonal ARIMA (SARIMA) models
 - Exponential smoothing methods
-- Vector Autoregression (VAR) models
-- Long Short-Term Memory (LSTM) networks for time series forecasting
-- Time series cross-validation techniques
+- Generalize autoregressive scores models (GAS)
 - Advanced topics in time series analysis
-
-## Folder Structure
-
-The repository is organized into the following folders:
-
-- `01-introduction`: Contains notes and code examples related to the introduction to time series analysis.
-- `02-arima-models`: Includes notes, exercises, and code examples for ARIMA and SARIMA models.
-- `03-exponential-smoothing`: Contains notes and code examples for exponential smoothing methods.
-- `04-var-models`: Includes notes and code examples for Vector Autoregression (VAR) models.
-- `05-lstm-forecasting`: Contains notes and code examples for Long Short-Term Memory (LSTM) networks for time series forecasting.
-- `06-cross-validation`: Includes notes and code examples for time series cross-validation techniques.
-- `07-advanced-topics`: Contains additional notes and resources on advanced topics in time series analysis.
-
-Feel free to explore each folder to access the relevant materials for each topic.
 
 ## Usage
 
@@ -55,12 +39,13 @@ To make the most of this repository, follow these steps:
 ## Contributing
 
 Contributions to this repository are welcome! If you find any errors, have additional resources to share, or want to improve the notes, please feel free to submit a pull request. Your contributions will help make this repository even better for the community.
+This repository is mainly written in Python language, so it will be a good exercise for you to convert the code in R language (or another).
 
 ## License
 
 This repository is licensed under the [MIT License](LICENSE). Feel free to use the materials, share them, and modify them for your personal or educational purposes.
 
-If you have any questions or need further assistance, please don't hesitate to reach out.
+If you have any questions or need further assistance, please don't hesitate to reach out. (albertotrashaj31@gmail.com)
 
 Happy learning!
 
