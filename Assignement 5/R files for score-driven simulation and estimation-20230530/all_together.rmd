@@ -1,0 +1,409 @@
+---
+title: "Untitled"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+# Functions
+
+
+## Martingale difference sequence
+
+The martingale_diff_u_t function calculates the factor innovations (u_t) for the uDCS_t_model.
+The function takes the following inputs:
+
+- y: The observed value of the process at time t.
+- mu_t: The dynamic location value at time t.
+- varsigma: The variance parameter of the uDCS_t_model.
+- nu: The degrees of freedom parameter of the uDCS_t_model.
+
+Calculate the factor innovations u_t using the formula:
+(1 / (1 + (y - mu_t)^2/(nu*varsigma)) * (y - mu_t)).
+
+The formula computes a weighted difference between the observed value y and the dynamic location mu_t. The weights are determined by the inverse of a scaled squared term (1 + (y - mu_t)^2/(nu*varsigma)). This weighting reflects the influence of the observed value and the dynamic location on the factor innovations.
+
+As output return the calculated factor innovations u_t as the output of the function.
+
+```{ 
+martingale_diff_u_t <- function(y, mu_t, varsigma, nu){
+  
+  u_t <- c((1 / (1 + (y - mu_t)^2/(nu*varsigma)) * (y - mu_t)))
+  
+  return(u_t)
+  }
+}
+
+```
+## Student distribution
+
+The uSTDT_uDCS_t function calculates the univariate Skewed Student's t-distribution (uSTDT) probability density function (pdf) for a given observed value y, dynamic location mu_t, variance parameter varsigma, and degrees of freedom parameter nu
+
+The function takes the following inputs:
+
+- y: The observed value of the process.
+- mu_t: The dynamic location value.
+- varsigma: The variance parameter of the uDCS_t_model.
+- nu: The degrees of freedom parameter of the uDCS_t_model.
+- log: A logical value indicating whether to return the log of the pdf. It is set to TRUE by default.
+
+Calculate the logarithm of the univariate Skewed Student's t-distribution pdf using the formula:
+(lgamma((nu + 1) / 2) - lgamma(nu / 2) - (1/2) * log(varsigma) - (1/2) * log(pi * nu) - ((nu + 1) / 2) * log(1 + (y - mu_t)^2 / (nu*varsigma))).
+
+The formula involves terms related to gamma functions, variance, degrees of freedom, and the squared difference between the observed value y and the dynamic location mu_t. It represents the logarithm of the probability density of the uSTDT distribution for the given parameters.
+
+Then transform ulpdf: if the log argument is not set to TRUE, the logarithm of the pdf (ulpdf) is exponentiated to obtain the actual probability density values.
+
+As output return the calculated uSTDT pdf values (ulpdf) as the output of the function.
+
+```{
+uSTDT_uDCS_t <- function(y, mu_t, varsigma, nu, log = TRUE){
+  
+  ulpdf <- (lgamma((nu + 1) / 2) - lgamma(nu / 2) - (1/2) * log(varsigma) -
+              (1/2)  * log(pi * nu) - ((nu + 1) / 2) * log(1 + (y - mu_t)^2 / (nu*varsigma) ))
+  
+  if(log != TRUE){
+    ulpdf <- exp(ulpdf)
+  } 
+  
+  return(ulpdf)
+}
+
+
+}
+
+```
+## Filter
+
+The uDCS_t_model_filter function performs the filtering step for the uDCS_t_model. It estimates the dynamic location and factor innovations, and computes the log-likelihood of the observed data given the model parameters.
+
+The function takes the following inputs:
+
+- y: The observed values of the process.
+- theta: A vector of parameters containing the values for omega, phi, k, varsigma, and nu.
+
+Initialize variables:
+
+Define the length of the observed data, create an empty array dloglik to store the log-likelihoods for each observation and initialize an empty numeric vector loglik to store the cumulative log-likelihood.
+Extract the parameter values from the theta vector.
+Define arrays for dynamic location and innovations:
+- Create an empty array mu_t to store the dynamic location values, with a length of T+1.
+- Create an empty array u_t to store the factor innovations, with a length of T.
+
+Initialize the dynamic location:
+Set the initial value of the dynamic location, calculate the log-density using the uSTDT_uDCS_t function for the first observation.
+
+Perform the filtering: iterate from t = 2 to T+1 to update the dynamic location and compute log-likelihoods for each observation.
+Compute the factor innovations u_t using the martingale_diff_u_t function.
+Update the dynamic location mu_t using the uDCS_t_model recursion formula.
+Compute the log-density for each observation using the uSTDT_uDCS_t function and store it in dloglik.
+Update the cumulative log-likelihood loglik by adding the log-density for the current observation.
+
+Convert the mu_t and u_t arrays into time series objects with appropriate start and frequency.
+Create a list containing the dynamic location, factor innovations, log-densities for each observation, and the log-likelihood.
+Return the list as the output of the function.
+
+```{
+uDCS_t_model_filter <- function(y, theta){
+  
+  ###Take T
+  T <- length(y)
+  
+  ###Define LogLikelihoods
+  dloglik <- array(data = NA, dim = c(T))
+  loglik  <- numeric()
+  
+  ###Parameter Selections Dynamic Location
+  omega <- theta[1]
+  phi   <- theta[2]
+  k     <- theta[3]
+  varsigma <- theta[4]
+  nu       <- theta[5]
+  
+  ###Define Dynamic Location and Innovations
+  mu_t <- array(data = NA, dim = c(T+1))
+  u_t  <- array(data = NA, dim = c(T))
+  
+  ###Initialize Dynamic Location
+  mu_t[1]   <- (omega)
+    
+    ###Initialize Likelihood
+    dloglik[1] <- uSTDT_uDCS_t(y[1], mu_t[1], varsigma = varsigma, nu = nu, log = TRUE)
+    loglik     <- dloglik[1]
+    
+    for(t in 2:(T+1)) {
+      ###Dynamic Location Innovations
+      u_t[t-1] <- martingale_diff_u_t(y[t-1], mu_t[t-1], varsigma, nu)
+      ###Updating Filter                    
+      mu_t[t]   <- omega + phi * (mu_t[t-1] - omega) + k * u_t[t-1]
+    
+      if(t < (T+1)){
+        ###Updating Likelihoods
+        dloglik[t] <- uSTDT_uDCS_t(y[t], mu_t = mu_t[t], varsigma = varsigma, nu = nu, log = TRUE)
+        loglik     <- loglik + dloglik[t]
+      }
+    }
+
+  ######################
+  ####### OUTPUT #######
+  ######################
+  mu_t <- ts(mu_t, start = start(y), frequency = frequency(y))
+  u_t  <- ts(u_t, start = start(y), frequency = frequency(y))
+  
+  ###Make List
+  out <- list(Dynamic_Location = mu_t,
+              Innovation_u_t   = u_t,
+              Log_Densities_i  = dloglik,
+              Log_Likelihood   = loglik)
+  
+  return(out)
+}
+
+```
+
+## Random numbers from a t distribution
+
+The uSTDT_rnd function generates random numbers from the univariate Skewed Student's t-distribution (uSTDT) with specified parameters
+The function takes the following inputs:
+
+- n: The number of random numbers to generate.
+- mu: The location parameter of the uSTDT.
+- varsigma: The scale parameter (variance) of the uSTDT.
+- nu: The shape parameter (degrees of freedom) of the uSTDT.
+
+Generate n random numbers from a Student's t-distribution with nu degrees of freedom using the rt function. Store the result in the vector z.
+Create an empty numeric vector y to store the generated random numbers.
+- Iterate over each element i from 1 to n.
+- Generate the uSTDT random number for the current iteration as mu + z[i] * sqrt(varsigma).
+- Store the generated random number in the vector y[i].
+
+```{
+uSTDT_rnd <- function(n, mu, varsigma, nu) {
+  
+  z <- rt(n, df = nu) 
+  y <- numeric()
+  for(i in 1:n){
+    y[i] <- c(mu + z[i]* sqrt(varsigma) ) 
+  }
+  
+  return(y)
+}
+
+}
+
+```
+
+
+## Simulator 
+The uDCS_t_model_simulator function generates simulated data for the uDCS_t_model based on the provided parameter values.
+
+The function takes the following inputs:
+
+- T: The length of the time series to be generated.
+- omega, phi, k, varsigma, nu: Parameters of the uDCS_t_model.
+
+Initialize the variables 
+- y: Array to store the generated observations of the process.
+- mu_t: Array to store the dynamic location values.
+- u_t: Array to store the innovations or factor innovations.
+
+Set Initial Values:
+
+Set the initial value of mu_t to omega.
+Generate the first observation of the process using the uSTDT_rnd function with parameters mu_t[1], varsigma, and nu.
+
+Dynamics loop:
+
+For each time step t from 2 to T:
+Calculate the factor innovations u_t[t-1] using the martingale_diff_u_t function with parameters y[t-1], mu_t[t-1], varsigma, and nu.
+Update the dynamic location mu_t[t] using the uDCS_t_model equation: omega + phi * (mu_t[t-1] - omega) + k * u_t[t-1].
+Generate the observation y[t] of the process using the uSTDT_rnd function with parameters mu_t[t], varsigma, and nu.
+
+Output:
+
+Create a list out containing the generated time series y, the dynamic location mu_t, and the innovations u_t, all converted to time series objects using as.ts.
+Return the out list as the output of the function.
+
+```{
+
+uDCS_t_model_simulator <- function(T, omega, phi, k, varsigma, nu){
+  
+  ###Define the Processes
+  y   <- array(data = NA, dim = c(T) ) 
+  
+  ###Define Dynamic Location and Innovations
+  mu_t <- array(data = NA, dim = c(T))
+  u_t  <- array(data = NA, dim = c(T-1))
+  
+  ###Initial value for the recursion 
+  mu_t[1]   <- omega
+  
+  ###Generate the first observations of the process
+  y[1]   <- uSTDT_rnd(1, mu_t[1], varsigma, nu)
+  
+    ###Dynamics 
+    for (t in 2:T) {
+      
+      ###Factor Innovations
+      u_t[t-1] <- martingale_diff_u_t(y[t-1], mu_t[t-1], varsigma, nu)
+        
+        ###Updating Filters                    
+        mu_t[t]   <- omega + phi * (mu_t[t-1] - omega) + k * u_t[t-1]
+        
+          ###Generate the observations of the processes
+          y[t] <- uSTDT_rnd(1, mu_t[t], varsigma, nu)
+    }
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  ###Make List
+  out <- list(y_t_gen          = as.ts(y),
+              Dynamic_Location = as.ts(mu_t),
+              Innovation_u_t   = as.ts(u_t))
+  
+  return(out)
+}
+}
+```
+
+## Estimator
+
+- Start the timer to measure the execution time.
+- Obtain the length T of the input data.
+- Extract the parameter values from the param argument.
+- Create a vector theta_st with the parameter values.
+- Define lower and upper bounds for the parameter values.
+- Optimize the uDCS_t_model filters:
+The code provides three different optimization methods that are commented out: L-BFGS-B, solnp, and nlminb.
+The selected method is nlminb, which is a faster optimization function compared to optim or solnp.
+The optimization is performed by calling the nlminb function and providing the starting parameter values, the objective function (interprete_uDCS_t_model), and other control parameters.
+- Retrieve the optimized parameter values from the optimizer result.
+- Create a vector theta_opt with all the optimized parameter values.
+- Create a list theta_list with the optimized parameter values.
+- Calculate the elapsed time by subtracting the start time from the current time.
+- Create an output list out containing the theta_list, theta_opt, and optimizer objects.
+- Return the out list as the output of the function.
+
+
+```{
+uDCS_t_model_estimator <- function(dati, param){
+  
+  Start <- Sys.time()
+  ###Take T
+  T <- length(dati)
+  
+  ###Parameter Selections Dynamic Location
+  omega <- param[1]
+  phi   <- param[2]
+  k     <- param[3]
+  
+  varsigma <- param[4]
+  nu       <- param[5]
+
+  ###Create a vector with the parameters
+  theta_st <- c(omega, phi, k, varsigma, nu)
+  
+  ###Take Bounds
+  lower <- c(-Inf, -0.999, -2, 1e-05, 2.099)
+  upper <- c( Inf,  0.999,  2, Inf, 300)
+  
+  #------> Optimize uDCS_t_model Filters w/L-BFGS-B
+  #optimizer <- suppressWarnings(optim(par = theta_st, fn = interprete_uDCS_t_model, 
+  #                                    dati = dati, method = "L-BFGS-B", 
+  #                                    control = list(trace = 1), hessian = FALSE,
+  #                                    lower = lower, upper = upper))
+  
+  #------> Optimize every uDCS_t_model Filters w/solnp := WAY faster than optim
+  #optimizer <- suppressWarnings(Rsolnp::solnp(pars = theta_st, fun = interprete_uDCS_t_model, 
+  #                                            dati  = dati, control = list(trace = 1), 
+  #                                            LB = lower, UB = upper)) 
+  
+  #------> Optimize every uDCS_t_model Filters w/nlminb := WAY faster than optim
+  optimizer <- suppressWarnings(nlminb(start = theta_st, objective = interprete_uDCS_t_model, 
+                                       dati  = dati, gradient = NULL, 
+                                       control = list(trace = 0), hessian = NULL,
+                                       lower = lower, upper = upper))
+  
+  #------> Save the optimized parameters Dynamic Location
+  omega_opt <- optimizer$par[1]  
+  phi_opt <- optimizer$par[2]
+  k_opt  <- (optimizer$par[3])
+  
+  varsigma_opt <- optimizer$par[4]
+  nu_opt       <- optimizer$par[5]
+  
+  ###Create a vector with ALL the optimized parameters
+  theta_opt <- c(omega_opt, phi_opt, k_opt, varsigma_opt, nu_opt)
+  
+  ###Create a list with ALL the optimized parameters
+  theta_list <- list(omega = omega_opt,
+                     phi = phi_opt,
+                     k  = k_opt,
+                     varsigma = varsigma_opt,
+                     nu    = nu_opt)
+  
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  #------> Some detail
+  Elapsed_Time <- Sys.time() - Start
+  print(paste("Elapsed Time: ", toString(Elapsed_Time)))
+  
+  ###Make List
+  out <- list(theta_list = theta_list,
+              theta      = theta_opt,
+              optimizer  = optimizer)
+  
+  return(out) 
+}
+}
+
+```
+## Example
+
+The data are simulated, and the functions used are Simulator, Estimator and Filter.
+
+```{
+T <- 600
+omega <- 0
+phi <- 0.8
+k <- 0.8
+varsigma <- 1
+nu <- 8
+
+theta <- c(omega, phi, k, varsigma, nu)
+
+simu <- uDCS_t_model_simulator(T, omega, phi, k, varsigma, nu)
+y = simu$y_t_gen
+ts.plot(y)
+# forecast::autoplot(simu$y_t_gen)
+
+est  <- uDCS_t_model_estimator(y, theta)
+est$theta_list
+
+filter <- uDCS_t_model_filter(y, est$theta)
+ts.plot(y)
+lines(filter$Dynamic_Location,col = "red")
+#autoplot(y) + autolayer(filter$Dynamic_Location)
+
+}
+
+```
+
+
+
+
+```{
+
+
+}
+
+```
+
+
+

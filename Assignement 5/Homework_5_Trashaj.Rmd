@@ -1,0 +1,756 @@
+---
+title: "Homework_5_Trashaj"
+output: html_document
+date: "2023-06-20"
+runtime: shiny
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Plot $u_t$ against $y_t$ for a DCS-t-location, a Beta-t-GARCH and a
+Beta-t-GARCH processes for different values of $\nu = 3, 10, 200$.
+
+In order to visualize better how the response of the score changes for
+different extreme observations I'm going to use the shiny library to
+make the plot interactive.
+
+a)  For a DCS-t location model we are going to define a function for the
+    martingale difference sequence, the function that generates numbers
+    from a t-student distribution and a function that simulate the model
+    using the function provided in the R-score files uploaded in
+    virtuale.
+
+Here the proper martingale difference sequence (MDS) can be defined as
+
+\$ u_t = (1 + \frac{v_t^2}{\nu e^{2\lambda}})\^{-1} v_t \$
+
+where $v_t = y_t - \mu{t|t-1}$
+
+```{r}
+martingale_diff_u_t <- function(y, mu_t, varsigma, nu){
+  
+  u_t <- c((1 / (1 + (y - mu_t)^2/(nu*varsigma)) * (y - mu_t)))
+  
+  return(u_t)
+}
+```
+
+Now we are going to define the function for the the random generating
+numbers
+
+```{r}
+uSTDT_rnd <- function(n, mu, varsigma, nu) {
+  
+  z <- rt(n, df = nu) 
+  y <- numeric()
+  for(i in 1:n){
+    y[i] <- c(mu + z[i]* sqrt(varsigma) ) 
+  }
+  
+  return(y)
+}
+
+
+```
+
+Here we define the function that simulate the process, the innovations
+factor and the updated filters. In particular recall that
+
+$\mu_{t+1 | t} = \omega + \phi\mu_{t|t-1} + ku_t$
+
+```{r}
+uDCS_t_model_simulator <- function(T, omega, phi, k, varsigma, nu){
+  
+  ###Define the Processes
+  y   <- array(data = NA, dim = c(T) ) 
+  
+  ###Define Dynamic Location and Innovations
+  mu_t <- array(data = NA, dim = c(T))
+  u_t  <- array(data = NA, dim = c(T-1))
+  
+  ###Initial value for the recursion 
+  mu_t[1]   <- omega
+  
+  ###Generate the first observations of the process
+  y[1]   <- uSTDT_rnd(1, mu_t[1], varsigma, nu)
+  
+  ###Dynamics 
+  for (t in 2:T) {
+    
+    ###Factor Innovations
+    u_t[t-1] <- martingale_diff_u_t(y[t-1], mu_t[t-1], varsigma, nu)
+    
+    ###Updating Filters                    
+    mu_t[t]   <- omega + phi * (mu_t[t-1] - omega) + k * u_t[t-1]
+    
+    ###Generate the observations of the processes
+    y[t] <- uSTDT_rnd(1, mu_t[t], varsigma, nu)
+  }
+  
+  ###Make List
+  out <- list(y_t_gen          = as.ts(y),
+              Dynamic_Location = as.ts(mu_t),
+              Innovation_u_t   = as.ts(u_t))
+  
+  return(out)
+}
+
+```
+
+Now we can simulate the process using some initial values
+
+```{r}
+T <- 800       # number of observations
+
+# Parameters
+omega <- 0     
+phi <- 0.8   
+k <- 0.8      
+varsigma <- 2.5
+
+
+# Values of nu to iterate over
+library(shiny)
+
+ui <- fluidPage(
+  sliderInput("nu_slider", "nu", min = 3, max = 200, value = 3), # Slider to select the value of nu
+  plotOutput("dcs_plot") # Placeholder for the plot
+)
+
+server <- function(input, output) {
+  output$dcs_plot <- renderPlot({
+    nu <- input$nu_slider # Get the current value of nu from the slider
+    simu <- uDCS_t_model_simulator(T, omega, phi, k, varsigma, nu) # Run the simulation with the selected nu value
+    
+    # Generate the y_t time series
+    y_t <- simu$y_t_gen
+    
+    # Plot the y_t time series with a title indicating the current nu value
+    ts.plot(y_t, main = paste("DCS simulation for the time varying location (nu =", nu, ")"))
+    
+    # Obtain the u_t transformation
+    u_t <- simu$Innovation_u_t
+    lines(u_t, col = "red")
+    
+  })
+}
+
+shinyApp(ui, server) #it may be required to open the plot in a browser
+
+#Uncomment the lines below to see just the three iterations
+
+#nu_values <- c(3, 10, 200)
+
+#for (nu in nu_values) {
+  #simu <- uDCS_t_model_simulator(T, omega, phi, k, varsigma, nu)
+  
+  # y_t
+  #y_t <- simu$y_t_gen
+  #dim(y_t)
+  #ts.plot(y_t, main = paste("DCS simulation for the time varying location (nu =", nu, ")"))
+  
+  # u_t
+  #u_t <- simu$Innovation_u_t
+  #dim(u_t)
+  #lines(u_t, col = "red")
+#}
+
+
+```
+
+As we can see as $\nu$ increases, $u_t$ show a more pronounced response
+to extreme observations. When $\nu$ is smaller, the extreme observations
+has a lower impact on the score.
+
+(b) For a Beta-t-GARCH as we did before we are going to introduce the
+    three functions but with different equations.
+
+Here the martingale difference sequence that we are going to use is the
+following: $u_t = \frac{(\nu + 1) * y^2}{(\nu-2)*\sigma_t + y^2} -1$
+
+```{r}
+mds_scale <- function(y, mu, sigma_t, nu){
+  u_t <- c((nu+1)*y^2 / ((nu-2)*sigma_t + y^2) - 1)
+  return(u_t)
+}
+```
+
+Now the data generating process of $y_t$ from a $t$-Student
+distribution, recall that for a Beta-t-GARCH process
+$y_t = \sigma_{t|t-1} * z_t$
+
+```{r}
+uSTDT_rnd_scale_beta <- function(n, sigma_t, nu) {
+  z <- rt(n, df = nu) 
+  y <- numeric()
+  for(i in 1:n){
+    y[i] <- c(z[i]* sqrt(sigma_t)) 
+  }
+  return(y)
+}
+```
+
+And finally the simulator for the scale. Recall that
+$\sigma_{t|t-1}^2 = \omega + \phi * \sigma_{t-1|t-2}^2 + k * \sigma_{t-1|t-2}^2 * u_{t-1}$
+
+```{r}
+beta_simulator_scale <- function(T, omega, phi, k, mu, nu){
+  
+  ###Define the Processes
+  y   <- array(data = NA, dim = c(T) ) 
+  
+  ###Define Dynamic Scale and Innovations
+  sigma_t <- array(data = NA, dim = c(T))
+  u_t  <- array(data = NA, dim = c(T-1))
+  
+  ###Initial value for the recursion 
+  sigma_t[1]   <- omega
+  
+  ###Generate the first observations of the process
+  y[1]   <- uSTDT_rnd_scale_beta(1, sigma_t[1], nu)
+  
+  ###Dynamics 
+  for (t in 2:T) {
+    
+    ###Factor Innovations
+    u_t[t-1] <- mds_scale(y[t-1], mu, sigma_t[t-1], nu)
+    
+    ###Updating Filters                    
+    sigma_t[t]   <- omega + phi * (sigma_t[t-1]^2) + k * (sigma_t[t-1]^2) * u_t[t-1]
+    
+    ###Generate the observations of the processes
+    y[t] <- uSTDT_rnd_scale_beta(1, sigma_t[t], nu)
+  }
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  ###Make List
+  out <- list(y_t_gen          = as.ts(y),
+              Dynamic_scale = as.ts(sigma_t),
+              Innovation_u_t   = as.ts(u_t))
+  
+  return(out)
+}
+```
+
+Now we can simulate the process with initial values of the parameters
+
+```{r}
+T <- 800       # number of observations
+# Parameters
+omega <- 1
+phi <- 0.5   
+k <- 0.2      
+mu <- 0  
+
+#uncomment those lines if you want so see the slider 
+
+#import shiny to make interactive visualizations
+#library(shiny)
+
+#ui <- fluidPage(
+  #sliderInput("nu_slider", "nu", min = 3, max = 200, value = 3), # Slider to select the value of nu
+  #plotOutput("beta_t_plot") # Placeholder for the plot
+#)
+
+#server <- function(input, output) {
+#  output$beta_t_plot <- renderPlot({
+#    nu <- input$nu_slider # Get the current value of nu from the slider
+#    simu <- beta_simulator_scale(T, omega, phi, k, varsigma, nu) # Run the simulation with the selected nu value
+    
+    # Generate the y_t time series
+#    y_t <- simu$y_t_gen
+    
+    # Plot the y_t time series with a title indicating the current nu value
+#    ts.plot(y_t, main = paste("Beta-t-GARCH simulation for the time varying scale(nu =", nu, ")"))
+    
+    # Obtain the u_t transformation
+ #   u_t <- simu$Innovation_u_t
+#    lines(u_t, col = "red")
+    
+  #})
+#}
+
+#shinyApp(ui, server) #it may be required to open the plot in a browser
+
+#comment the lines below to see just the plot with the slider
+
+nu_values <- c(3, 10, 200)
+
+for (nu in nu_values) {
+  simu <- uDCS_t_model_simulator(T, omega, phi, k, varsigma, nu)
+  
+   #y_t
+  y_t <- simu$y_t_gen
+  dim(y_t)
+  ts.plot(y_t, main = paste("DCS simulation for the time varying location (nu =", nu, ")"))
+  
+   #u_t
+  u_t <- simu$Innovation_u_t
+  dim(u_t)
+  lines(u_t, col = "red")
+}
+
+
+```
+
+Even here we can derive the same conclusion as before.
+
+c)  For the Beta-t-EGARCH process the MDS we are going to use is the
+    following:
+
+$u_t = \frac{(\nu +1)y_t^2}{\nu*e^{2*\lambda_{t|t-1} + y_t^2} -1$
+
+```{r}
+mds_lambda <- function(y, mu, lambda_t, nu){
+  u_t <- c((nu+1)*y^2 / (nu*exp(2*lambda_t) + y^2) - 1)
+  return(u_t)
+}
+
+```
+
+Recall that in the Beta-t-EGARCH process
+$y_t = z_t * e^{\lambda_{t|t-1}}$
+
+```{r}
+uSTDT_rnd_lambda <- function(n, lambda_t, nu) {
+  z <- rt(n, df = nu) 
+  y <- numeric()
+  for(i in 1:n){
+    y[i] <- c(z[i]* exp(lambda_t)) 
+  }
+  return(y)
+}
+```
+
+And finally the simulator for the scale. Recall that
+$\lambda_{t|t-1} = \omega + \phi * \lambda_{t-1|t-2} + k * u_{t-1}$
+
+```{r}
+simulator_lambda <- function(T, omega, phi, k, mu, nu){
+  
+  ###Define the Processes
+  y   <- array(data = NA, dim = c(T) ) 
+  
+  ###Define Dynamic Scale and Innovations
+  lambda_t <- array(data = NA, dim = c(T))
+  u_t  <- array(data = NA, dim = c(T-1))
+  
+  ###Initial value for the recursion 
+  lambda_t[1]   <- (log(omega))/2
+  
+  ###Generate the first observations of the process
+  y[1]   <- uSTDT_rnd_lambda(1, lambda_t[1], nu)
+  
+  ###Dynamics 
+  for (t in 2:T) {
+    
+    ###Factor Innovations
+    u_t[t-1] <- mds_lambda(y[t-1], mu, lambda_t[t-1], nu)
+    
+    ###Updating Filters                    
+    lambda_t[t]   <- omega + phi * lambda_t[t-1] + k * u_t[t-1]
+    
+    ###Generate the observations of the processes
+    y[t] <- uSTDT_rnd_lambda(1, lambda_t[t], nu)
+  }
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  ###Make List
+  out <- list(y_t_gen          = as.ts(y),
+              Dynamic_scale = as.ts(exp(2*lambda_t)),
+              Innovation_u_t   = as.ts(u_t))
+  
+  return(out)
+}
+```
+
+The simulation with initial number of observations and the values of the
+parameters
+
+```{r}
+T <- 800       # number of observations
+# Parameters
+omega <- 1    
+phi <- 0.5     
+k <- 0.2      
+mu <- 0
+
+
+# Values of nu to iterate over
+library(shiny)
+
+ui <- fluidPage(
+  sliderInput("nu_slider", "nu", min = 3, max = 200, value = 3), # Slider to select the value of nu
+  plotOutput("dcs_plot") # Placeholder for the plot
+)
+
+server <- function(input, output) {
+  output$dcs_plot <- renderPlot({
+    nu <- input$nu_slider # Get the current value of nu from the slider
+    simu <- simulator_lambda(T, omega, phi, k, varsigma, nu) # Run the simulation with the selected nu value
+    
+    # Generate the y_t time series
+    y_t <- simu$y_t_gen
+    
+    # Plot the y_t time series with a title indicating the current nu value
+    ts.plot(y_t, main = paste("Beta-EGARCH simulation for the time varying scale (nu =", nu, ")"))
+    
+    # Obtain the u_t transformation
+    u_t <- simu$Innovation_u_t
+    lines(u_t, col = "red")
+    
+  })
+}
+
+shinyApp(ui, server) #it may be required to open the plot in a browser
+
+#Uncomment the lines below to see just the three iterations
+
+#nu_values <- c(3, 10, 200)
+
+#for (nu in nu_values) {
+  #simu <- uDCS_t_model_simulator(T, omega, phi, k, varsigma, nu)
+  
+  # y_t
+  #y_t <- simu$y_t_gen
+  #dim(y_t)
+  #ts.plot(y_t, main = paste("DCS simulation for the time varying location (nu =", nu, ")"))
+  
+  # u_t
+  #u_t <- simu$Innovation_u_t
+  #dim(u_t)
+  #lines(u_t, col = "red")
+#}
+```
+
+The second request asked to simulate a score driven model for the scale
+with parameter specified as I choose. So, let's take a GARCH (1,1) model
+with standard normal residuals.
+
+Let's define the proper MDS:
+
+$u_t = \frac{y_t^2}{\sigma_{t|t-1}^2}-1$
+
+```{r}
+mds_garch <- function(y, mu, sigma_t){
+  
+  u_t <- c(((y^2)/(sigma_t)) -1)
+  return(u_t)
+  
+}
+```
+
+Now we need to generate the observations, recall that
+$y_t = \sigma_{t|t-1}*z_t$
+
+where $z_t \thicksim NID(0,1)$
+
+```{r}
+uSTDT_rnd_garch <- function(n, sigma_t) {
+  z <- rnorm(n,0,1) 
+  y <- numeric()
+  for(i in 1:n){
+    y[i] <- c(z[i]* sqrt(sigma_t)) 
+  }
+  return(y)
+}
+```
+
+Here we implement the function simulator, recall that
+
+$\sigma_{t|t-1}^2 = omega + phi*\sigma_{t|t-1}^2 + k*\sigma_{t|t-1}^2*u_t$
+
+```{r}
+simulator_garch <- function(T, omega, phi, k, mu){
+  
+  ###Define the Processes
+  y   <- array(data = NA, dim = c(T) ) 
+  
+  ###Define Dynamic Scale and Innovations
+  sigma_t <- array(data = NA, dim = c(T))
+  u_t  <- array(data = NA, dim = c(T-1))
+  v <- array(data = NA, dim = c(T-1))
+  
+  ###Initial value for the recursion 
+  sigma_t[1]   <- omega
+  
+  ###Generate the first observations of the process
+  y[1]   <- uSTDT_rnd_garch(1, sigma_t[1])
+  
+  ###Dynamics 
+  for (t in 2:T) {
+    
+    ###Factor Innovations
+    u_t[t-1] <- mds_garch(y[t-1], mu, sigma_t[t-1])
+    
+    ###Updating Filters                    
+    sigma_t[t]   <- omega + phi * sigma_t[t-1] + k * sigma_t[t-1] * u_t[t-1]
+    
+    ###Generate the observations of the processes
+    y[t] <- uSTDT_rnd_garch(1, sigma_t[t])
+    
+    ##Define the prediction error
+    
+    v[t-1] <- (y[t-1])^2 - sigma_t[t-1]
+  }
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  ###Make List
+  out <- list(y_t_gen          = as.ts(y),
+              Dynamic_scale = as.ts(sigma_t),
+              Innovation_u_t   = as.ts(u_t),
+              prediction_error = as.ts(v))
+  
+  return(out)
+}
+```
+
+Now we can plot the series
+
+```{r}
+T <- 800       # number of observations
+omega <- 1    
+phi <- 0.5    
+k <- 0.5       
+mu <- 0        
+
+# Simulation
+simulation <- simulator_garch(T, omega, phi, k, mu)
+
+# Plot the series y_t:
+y_t <- simulation$y_t_gen  # simulated time series 
+ts.plot(y_t, main="Simulated GARCH(1,1)")
+```
+
+We can plot the time varying parameter
+
+```{r}
+time_v <- simulation$Dynamic_scale
+ts.plot(time_v, main="Plot the time varying parameter sigma")
+
+```
+
+We can plot $u_t$ and $v_t$
+
+```{r}
+v_t <- simulation$prediction_error
+ts.plot(v_t, main="Plot of v_t in black and u_t in red")
+u_t <- simulation$Innovation_u_t
+lines(u_t, col="red")
+```
+
+Now to estimate the models I'm going to use the function defined in the
+R-score file uploaded in virtuale.
+
+```{r}
+uSTDT_uDCS_t <- function(y, sigma_t, varsigma, nu, log = TRUE){
+  
+  ulpdf <- (lgamma((nu + 1) / 2) - lgamma(nu / 2) - (1/2) * log(varsigma) -
+              (1/2)  * log(pi * nu) - ((nu + 1) / 2) * log(1 + (y - sigma_t)^2 / (nu*varsigma) ))
+  
+  if(log != TRUE){
+    ulpdf <- exp(ulpdf)
+  } 
+  
+  return(ulpdf)
+}
+```
+
+```{r}
+uDCS_t_model_filter <- function(y, theta){
+  
+  ###Take T
+  T <- length(y)
+  
+  ###Define LogLikelihoods
+  dloglik <- array(data = NA, dim = c(T))
+  loglik  <- numeric()
+  
+  ###Parameter Selections Dynamic Scale
+  omega <- theta[1]
+  phi   <- theta[2]
+  k     <- theta[3]
+  
+  varsigma <- theta[4]
+  nu       <- theta[5]
+  
+  ###Define Dynamic Scale and Innovations
+  
+  u_t  <- array(data = NA, dim = c(T))
+  sigma_t  <- array(data = NA, dim = c(T+1))
+  
+  ###Initialize Dynamic Scale
+  sigma_t[1]   <- (omega)
+  
+  ###Initialize Likelihood
+  dloglik[1] <- uSTDT_uDCS_t(y[1], sigma_t[1], varsigma = varsigma, nu = nu, log = TRUE)
+  loglik     <- dloglik[1]
+  
+  for(t in 2:(T+1)) {
+    ###Dynamic Scale Innovations
+    u_t[t-1] <- mds_garch(y[t-1], sigma_t[t], varsigma)
+    ###Updating Filter                    
+    sigma_t[t]   <- omega + phi * sigma_t[t-1] + k * sigma_t[t-1] * u_t[t-1]
+    
+    if(t < (T+1)){
+      ###Updating Likelihoods
+      dloglik[t] <- uSTDT_uDCS_t(y[t], sigma_t = sigma_t[t], varsigma = varsigma, nu = nu, log = TRUE)
+      loglik     <- loglik + dloglik[t]
+    }
+  }
+  
+  ######################
+  ####### OUTPUT #######
+  ######################
+  sigma_t <- ts(sigma_t, start = start(y), frequency = frequency(y))
+  u_t  <- ts(u_t, start = start(y), frequency = frequency(y))
+  
+  ###Make List
+  out <- list(Dynamic_Scale= sigma_t,
+              Innovation_u_t   = u_t,
+              Log_Densities_i  = dloglik,
+              Log_Likelihood   = loglik)
+  
+  return(out)
+}
+```
+
+```{r}
+interprete_uDCS_t_model <- function(dati, param){
+  
+  ###Take T
+  T <- length(dati)
+  
+  ###Parameter Selections Dynamic Location
+  omega <- param[1]
+  phi   <- param[2]
+  k     <- param[3]
+  
+  varsigma <- param[4]
+  nu       <- param[5]
+  
+  ###Create a new vector with the parameters
+  theta_new <- c(omega, phi, k, varsigma, nu)
+  
+  #------> Fitness Functions
+  fitness <- uDCS_t_model_filter(dati, theta_new)$Log_Likelihood
+  
+  if(is.na(fitness) | !is.finite(fitness)) fitness <- -1e10
+  if(fitness != fitness) fitness <- -1e10
+  
+  return(-fitness)
+}
+```
+
+```{r}
+garch_estimator <- function(dati, param){
+  
+  Start <- Sys.time()
+  ###Take T
+  T <- length(dati)
+  
+  ###Parameter Selections Dynamic Scale
+  omega <- param[1]
+  phi   <- param[2]
+  k     <- param[3]
+  
+  varsigma <- param[4]
+  nu       <- param[5]
+  
+  ###Create a vector with the parameters
+  theta_st <- c(omega, phi, k, varsigma, nu)
+  
+  ###Take Bounds
+  lower <- c(-Inf, -0.999, -2, 1e-05, 2.099)
+  upper <- c( Inf,  0.999,  2, Inf, 300)
+  
+  #------> Optimize uDCS_t_model Filters w/L-BFGS-B
+  #optimizer <- suppressWarnings(optim(par = theta_st, fn = interprete_uDCS_t_model, 
+  #                                    dati = dati, method = "L-BFGS-B", 
+  #                                    control = list(trace = 1), hessian = FALSE,
+  #                                    lower = lower, upper = upper))
+  
+  #------> Optimize every uDCS_t_model Filters w/solnp := WAY faster than optim
+  #optimizer <- suppressWarnings(Rsolnp::solnp(pars = theta_st, fun = interprete_uDCS_t_model, 
+  #                                            dati  = dati, control = list(trace = 1), 
+  #                                            LB = lower, UB = upper)) 
+  
+  #------> Optimize every uDCS_t_model Filters w/nlminb := WAY faster than optim
+  optimizer <- suppressWarnings(nlminb(start = theta_st, objective = interprete_uDCS_t_model, 
+                                       dati  = dati, gradient = NULL, 
+                                       control = list(trace = 0), hessian = NULL,
+                                       lower = lower, upper = upper))
+  
+  #------> Save the optimized parameters Dynamic Scale
+  omega_opt <- optimizer$par[1]  
+  phi_opt <- optimizer$par[2]
+  k_opt  <- (optimizer$par[3])
+  
+  varsigma_opt <- optimizer$par[4]
+  nu_opt       <- optimizer$par[5]
+  
+  ###Create a vector with ALL the optimized parameters
+  theta_opt <- c(omega_opt, phi_opt, k_opt, varsigma_opt, nu_opt)
+  
+  ###Create a list with ALL the optimized parameters
+  theta_list <- list(omega = omega_opt,
+                     phi = phi_opt,
+                     k  = k_opt,
+                     varsigma = varsigma_opt,
+                     nu    = nu_opt)
+  
+  ######################
+  ####### OUTPUT #######
+  ######################
+  
+  #------> Some detail
+  Elapsed_Time <- Sys.time() - Start
+  print(paste("Elapsed Time: ", toString(Elapsed_Time)))
+  
+  ###Make List
+  out <- list(theta_list = theta_list,
+              theta      = theta_opt,
+              optimizer  = optimizer)
+  
+  return(out) 
+}
+```
+
+```{r}
+# Estimation 
+set.seed(1234)
+mod_est <- garch_estimator(y_t, c(omega, phi, k, 1, 30))
+par<-mod_est$theta_list # estimated parameters 
+par
+```
+
+```{r}
+#Estimation of the sigma
+est_sigma<- array(data = NA, dim = T)
+est_w<- array(data = NA, dim = T-1)
+est_sigma[1] <- 1
+for(t in 2:T) {
+  est_w [t-1] <- (y_t[t-1]^2 / est_sigma[t-1]^2) - 1
+  est_sigma[t]<- par$omega + (par$phi * est_sigma[t-1]^2)+ (par$k * est_sigma[t-1]^2 * est_w[t-1])
+}
+ts.plot(est_sigma, main="Estimated time varing sigma ", ylim=c(-3,3), xlim=c(0,300))
+lines(time_v, col="blue")
+
+
+```
+
+Here in the last graph we can see that the estimated variance is far
+different from the simulated one (blue line). This is because they have
+been estimated with a different \$z_t\$ (t-Student and not Normal
+distribution).
